@@ -1,0 +1,452 @@
+---
+header-includes:
+- \usepackage{xeCJK}
+- \usepackage{fontspec}
+- \setCJKmainfont{微軟正黑體}
+- \XeTeXlinebreaklocale "zh"
+- \XeTeXlinebreakskip = 0pt plus 1pt
+
+title: "Survival analysis 期末專題"
+author: "吳翔宇"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+classoption: 12pt
+---
+
+```{r global options, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE,message = FALSE,fig.showtext = TRUE)
+library(showtext)
+showtext_auto()
+
+```
+# 一、研究目的
+   
+本次分析希望藉由此資料集來分析各個因子影響乳癌的嚴重性與重要性，找出對於乳癌患者來說影響其生存時間的重要因素。
+
+# 二、資料簡介
+    
+本次使用資料為德國乳腺癌研究組(GBSG)於1984年7月到1989年12月召募了720名原發性淋巴結陽性乳腺癌患者，以研究3和6週期的化療和使用tamoxifen(泰莫西芬)進行額外激素治療的有效性。
+     
+- Tamoxifen   
+    
+  抗雌激素Tamoxifen (泰莫西芬)是早期的標準荷爾蒙治療選擇，可使用於不管停經前停經後，淋巴結轉移與否，只要荷爾蒙受體陽性(ER+)皆可適用。
+   
+## 變數介紹
+          
+- pid：患者ID
+- age：年齡(年)
+- meno：更年期狀態(0 = 停經前, 1 = 停經後)　　
+- size：腫瘤大小(mm)　　　　
+- grade：腫瘤分級(低到高依序為輕等、中等及嚴重)　　　
+- nodes：陽性淋巴結數　
+- pgr：孕激素受體(fmol/l) 是一種會在乳房、卵巢、子宫和子宫頸中作用的蛋白質受體。
+- er：雌激素受體(fmol/l)　
+- hormon：是否接受激素療法(0= 否, 1 = 是)　　　
+- rfstime：復發、死亡或失去追蹤時間　　　
+- status：0 = 存活, 1 = 死亡
+
+\newpage
+
+## 資料檢視　  
+   
+```{r data}
+library(survival)
+data("cancer",package = "survival")
+head(gbsg,3)
+tail(gbsg,3)
+```
+
+## 資料處理&各變數介紹
+
+### 1. age(年齡)
+
+
+```{r age, fig.height=2.5, fig.width=6}
+gbsg$age[gbsg$age <= 40] = 1
+gbsg$age[gbsg$age > 40 & gbsg$age <= 60] = 2
+gbsg$age[gbsg$age > 60 & gbsg$age <= 80] = 3
+gbsg$age = factor(gbsg$age)
+table(gbsg$age);plot(gbsg$age, main = "age年齡", xlab = "age")
+```
+
+### 2. meno更年期狀態 (0 = 停經前 , 1 = 停經後 ) 
+
+```{r meno, fig.height=2.5, fig.width=6}
+gbsg$meno = factor(gbsg$meno)
+table(gbsg$meno)
+plot(gbsg$meno, main = "meno更年期狀態 (0 = 停經前 , 1 = 停經後 )")
+```
+
+
+### 3. size(腫瘤大小 (mm))
+
+將size分成三類，小於30mm、介於30-60mm與大於60mm
+```{r size, fig.height=2.5, fig.width=6}
+gbsg$size[gbsg$size <= 30] = 1
+gbsg$size[gbsg$size > 30 & gbsg$size <= 60] = 2
+gbsg$size[gbsg$size > 60] = 3
+gbsg$size = factor(gbsg$size)
+table(gbsg$size);plot(gbsg$size,main = "size(腫瘤大小 (mm))", xlab = "size")
+```
+
+### 4. grade(腫瘤分級)
+
+```{r grade, fig.height=3, fig.width=6}
+gbsg$grade = factor(gbsg$grade)
+table(gbsg$grade)
+plot(factor(gbsg$grade), main = "grade(腫瘤分級)")
+```
+\newpage
+
+### 5. nodes(陽性淋巴結數)
+
+```{r nodes, fig.height=3, fig.width=6}
+summary(gbsg$nodes);hist(gbsg$nodes, main = "nodes(陽性淋巴結數)", xlab = "nodes")
+```
+
+### 6. pgr(孕激素受體 (fmol/l))
+
+```{r pgr, fig.height=3, fig.width=6}
+summary(gbsg$pgr);hist(gbsg$pgr, main = "pgr(孕激素受體 (fmol/l))", xlab = "pgr")
+```
+
+### 7. er(雌激素受體 (fmol/l))
+
+```{r er, fig.height=2.5, fig.width=6}
+summary(gbsg$er);hist(gbsg$er, main = "er(雌激素受體 (fmol/l))", xlab = "er")
+```
+
+### 8. hormon(是否接受激素療法 (0= 否 , 1 = 是 ))
+
+```{r hormon, fig.height=2.5, fig.width=6}
+gbsg$hormon = factor(gbsg$hormon)
+table(gbsg$hormon);plot(gbsg$hormon, main = "hormon(是否接受激素療法 (0= 否 , 1 = 是 ))")
+```
+\newpage
+
+# 三、資料分析
+   
+# 1. Kaplan-Meier Survival estimate
+    
+首先使用 `Kaplan-Meier Survival estimate` 分別繪製出`是否接受激素療法`與`停經前後`存活曲線圖，接著使用 `log rank test` 檢定兩組之前是否真的有差別，最後因為此實驗為二因子實驗，我會將一因子固定的情況下照著上述的流程繪製出存活曲線圖，並做檢定。
+
+## 是否接受激素療法
+```{r km hormon, fig.height=4, fig.width=8}
+# 是否接受激素療法
+fit_km_hormon = survfit(Surv(rfstime,status) ~ hormon, data = gbsg, 
+                        type="kaplan-meier",error="greenwood",conf.int=0.95)
+plot(fit_km_hormon, lwd=2,lty=c(2,1),col = c(1,2),conf.int=F,mark.time=F,
+     xlab="Time",ylab="Survival",main = "是否接受激素療法")
+legend("bottomleft",c("沒接受激素療法", "有接受激素療法"),lwd=2,
+       lty=c(1,2),col=c(1,2))
+
+# log rank test 
+fit_diff_hormon = survdiff(Surv(rfstime,status) ~ hormon, data = gbsg)
+fit_diff_hormon
+
+# mean survival time
+library(survRM2)
+(rmt = rmst2(gbsg$rfstime, gbsg$status, gbsg$hormon))
+plot(rmt)
+```
+可以看到有接受激素療法的組別存活曲線一直在沒接受激素療法上，且在log rank test中p-value為0.003 < 0.05，表示兩組之間存在差異，可以看到平均存活時間，在這個實驗下有接受激素療法的患者平均生存時間95%信賴區間為(1654,1895)天，沒接受激素療法的患者平均生存時間95%信賴區間為(1441,1634)天。
+    
+## 停經前後分別對於是否接受激素療法
+```{r km hormon group by meno , fig.height=4, fig.width=8}
+par(mfrow = c(1,2))
+# 停經前是否接受激素療法與否
+fit_km_hormon0= survfit(Surv(rfstime,status) ~ hormon, data = gbsg, 
+                 subset = (meno == 0),
+                 type="kaplan-meier",error="greenwood",conf.int=0.95)
+plot(fit_km_hormon0, lwd=2,lty=c(2,1),col = c(1,2),conf.int=F,mark.time=F,
+     xlab="Time",ylab="Survival",main = "停經前是否接受激素療法")
+legend("bottomleft",c("沒接受激素療法", "有接受激素療法"),lwd=2,
+       lty=c(1,2),col=c(1,2))
+
+# 停經後是否接受激素療法與否
+fit_km_hormon1= survfit(Surv(rfstime,status) ~ hormon, data = gbsg, 
+                 subset = (meno == 1),
+                 type="kaplan-meier",error="greenwood",conf.int=0.95)
+plot(fit_km_hormon1, lwd=2,lty=c(2,1),col = c(1,2),conf.int=F,mark.time=F,
+     xlab="Time",ylab="Survival", main = "停經後是否接受激素療法")
+legend("bottomleft",c("沒接受激素療法", "有接受激素療法"),lwd=2,
+       lty=c(1,2),col=c(1,2))
+
+```
+
+```{r hormon group by meno log rank test}
+# log rank test with meno = 0
+fit_diff_hormon0 = survdiff(Surv(rfstime,status) ~ hormon, data = gbsg, 
+                 subset = (meno == 0))
+fit_diff_hormon0
+
+# log rank test with meno = 1
+fit_diff_hormon1 = survdiff(Surv(rfstime,status) ~ hormon, data = gbsg, 
+                      subset = (meno == 1))
+fit_diff_hormon1
+```
+```{r , fig.height=4, fig.width=8}
+# mean survival time for meno = 0
+par(mfrow = c(2,2))
+(rmt1 = rmst2(gbsg$rfstime[gbsg$meno == 0], gbsg$status[gbsg$meno == 0], gbsg$hormon[gbsg$meno == 0]))
+plot(rmt1)
+# mean survival time for meno = 1
+(rmt2 = rmst2(gbsg$rfstime[gbsg$meno == 1], gbsg$status[gbsg$meno == 1], gbsg$hormon[gbsg$meno == 1]))
+plot(rmt2)
+```
+
+
+根據繪製出的存活曲線圖可以看到不管是在停經前或是停經後，`有接受激素療法`的存活曲線始終高於`沒接受激素療法`，但在log rank test中，停經前的p-value為0.1 > 0.05表示停經前無論是否接受激素療法對於患者之存活率無顯著影響，停經後之p-value為0.008 < 0.05表示停經後是否接受激素療法對於患者之存活率有顯著影響，可以看到平均存活時間，在這個實驗下`停經前有接受激素療法`的患者平均生存時間95%信賴區間為(1597,2079)天，`停經前沒接受激素療法`的患者平均生存時間95%信賴區間為(1466,1741)天，`停經後有接受激素療法`的患者平均生存時間95%信賴區間為(1575,1839)天，`停經後沒接受激素療法`的患者平均生存時間95%信賴區間為(1341,1591)天，可以發現停經前的平均存活時間是高於停經後的平均存活時間的。
+\newpage
+
+## 是否停經
+
+```{r km meno, fig.height=4, fig.width=8}
+# 是否停經
+fit_km_meno = survfit(Surv(rfstime,status) ~ meno, data = gbsg, 
+                        type="kaplan-meier",error="greenwood",conf.int=0.95)
+plot(fit_km_meno, lwd=2,lty=c(2,1),col = c(1,2),conf.int=F,mark.time=F,
+     xlab="Time",ylab="Survival",main = "是否停經")
+legend("bottomleft",c("停經前", "停經後"),lwd=2,lty=c(1,2),col=c(1,2))
+# log rank test 
+fit_diff_meno = survdiff(Surv(rfstime,status) ~ meno, data = gbsg)
+fit_diff_meno
+```
+\newpage
+
+## 是否接受激素療法分別對是否停經
+
+```{r km meno group by hormon, fig.height=4, fig.width=8}
+par(mfrow = c(1,2))
+# 沒接受激素療法對是否停經
+fit_km_meno0= survfit(Surv(rfstime,status) ~ meno, data = gbsg, 
+                 subset = (hormon == 0),
+                 type="kaplan-meier",error="greenwood",conf.int=0.95)
+plot(fit_km_meno0, lwd=2,lty=c(2,1),col = c(1,2),conf.int=F,mark.time=F,
+     xlab="Time",ylab="Survival", main = "沒接受激素療法對是否停經")
+legend("bottomleft",c("停經前", "停經後"),lwd=2,
+       lty=c(1,2),col=c(1,2))
+
+# 有接受激素療法對是否停經
+fit_km_meno1= survfit(Surv(rfstime,status) ~ meno, data = gbsg, 
+                 subset = (hormon == 1),
+                 type="kaplan-meier",error="greenwood",conf.int=0.95)
+plot(fit_km_meno1, lwd=2,lty=c(2,1),col = c(1,2),conf.int=F,mark.time=F,
+     xlab="Time",ylab="Survival", main = "有接受激素療法對是否停經")
+legend("bottomleft",c("停經前", "停經後"),lwd=2,
+       lty=c(1,2),col=c(1,2))
+```
+\newpage
+```{r}
+# mean survival time
+(rmt = rmst2(gbsg$rfstime, gbsg$status, gbsg$meno))
+plot(rmt)
+```
+
+```{r meno group by hormon log rank test}
+# log rank test with hormon = 0
+fit_diff_meno0 = survdiff(Surv(rfstime,status) ~ meno, data = gbsg, 
+                 subset = (hormon == 0))
+fit_diff_meno0
+
+# log rank test with hormon = 1
+fit_diff_meno1 = survdiff(Surv(rfstime,status) ~ meno, data = gbsg, 
+                 subset = (hormon == 1))
+fit_diff_meno1
+```
+
+根據繪出的存活曲線圖可以看到兩組之間的存活曲線並沒有顯著差異，且在logrank test中p-value為0.6 > 0.05表示停經前後對於存活率並沒有顯著影響，接著看到是否接受激素療法分別對是否停經的部分，在不管是否接受激素療法，p-value分別為0.3及0.4大於0.05表示無論是否接受激素療法，停經前後對於存活率的影響皆不顯著，從平均存活時間來看`停經後`的平均存活時間95%信賴區間為(1513,1707)天，`停經前`的平均存活時間95%信賴區間為(1541,1780)天，兩者信賴區間互相重疊。
+\newpage
+
+# 2. Cox PH model 
+
+## (1) 考慮主效應
+
+```{r selectcox, include=FALSE}
+library(pec)
+Cox_select = selectCox(Surv(rfstime,status) ~ meno + age + size + grade + nodes +
+                         pgr + er + hormon,data = gbsg)
+Cox_select$In
+```
+
+### AIC function
+
+```{r}
+AIC = function(fit){
+  aic = -2*fit$loglik[2] + 2*length(fit$coefficients)
+  return(aic)
+}
+```
+
+### step 1. 考慮meno
+
+```{r Cox meno}
+fit_Cox1 = coxph(Surv(rfstime,status) ~ meno, data = gbsg)
+summary(fit_Cox1)
+
+AIC(fit_Cox1)
+```
+可以看到Cox PH model下只加入meno的模型Likelihood ratio test、Wald test與Score test三者p-value皆大於0.05，與先前log rank test檢定出的結果符合，表示停經前後對於存活率/風險比並沒有顯著影響，因此後面的模型不會將meno放入。
+
+### step 2. 考慮hormon
+
+```{r Cox hormon}
+fit_Cox2 = coxph(Surv(rfstime,status) ~ hormon, ties=c("breslow"), data = gbsg)
+summary(fit_Cox2)
+AIC(fit_Cox2)
+```
+將hormon放入模型，hormon為顯著的且AIC為3569.53
+
+### step 3. 加入第二個解釋變數
+
+```{r Cox add one variable}
+variable = names(gbsg)[c(2,4:8)]
+aic = c(1:length(variable))
+
+for(i in 1:length(variable)){
+  dat = data.frame(gbsg[,colnames(gbsg) == variable[i]],gbsg[,c(9:11)])
+  fit = coxph(Surv(rfstime,status) ~ hormon + ., 
+              ties=c("breslow"), data = dat)
+  aic[i] = AIC(fit)
+}
+aic[which.min(aic)]
+variable[which.min(aic)]
+```
+加入第二個解釋變數時，將nodes加入模型中使模型擁有最小的AIC且AIC低於只有hormon在模型內時，因此將nodes加入模型。
+
+### step 4. 加入第三個解釋變數
+
+```{r Cox add two variable}
+variable = names(gbsg)[c(2,4,5,7,8)]
+aic = c(1:length(variable))
+
+for(i in 1:length(variable)){
+  dat = data.frame(gbsg[,colnames(gbsg) == variable[i]],gbsg[,c(6,9:11)])
+  fit = coxph(Surv(rfstime,status) ~ hormon + nodes + ., 
+              ties=c("breslow"), data = dat)
+  aic[i] = AIC(fit)
+}
+aic[which.min(aic)]
+variable[which.min(aic)]
+```
+加入第三個解釋變數時，將pgr加入模型中使模型擁有最小的AIC且AIC低於模型內有hormon與nodes時，因此將pgr加入模型。
+
+### step 5. 加入第四個解釋變數
+
+```{r Cox add three variable}
+variable = names(gbsg)[c(2,4,5,8)]
+aic = c(1:length(variable))
+
+for(i in 1:length(variable)){
+  dat = data.frame(gbsg[,colnames(gbsg) == variable[i]],gbsg[,c(6:7,9:11)])
+  fit = coxph(Surv(rfstime,status) ~ hormon + nodes + ., 
+              ties=c("breslow"), data = dat)
+  aic[i] = AIC(fit)
+}
+aic[which.min(aic)]
+variable[which.min(aic)]
+```
+加入第四個解釋變數時，將grade加入模型中使模型擁有最小的AIC且AIC低於模型內有hormon、nodes與pgr時，因此將grade加入模型。
+
+### step 6. 加入第五個解釋變數
+
+```{r Cox add four variable}
+variable = names(gbsg)[c(2,4,8)]
+aic = c(1:length(variable))
+
+for(i in 1:length(variable)){
+  dat = data.frame(gbsg[,colnames(gbsg) == variable[i]],gbsg[,c(5:7,9:11)])
+  fit = coxph(Surv(rfstime,status) ~ hormon + nodes + ., 
+              ties=c("breslow"), data = dat)
+  aic[i] = AIC(fit)
+}
+aic[which.min(aic)]
+variable[which.min(aic)]
+```
+加入第五個解釋變數時，將size加入模型中使模型擁有最小的AIC，但AIC並沒有低於模型內有hormon、nodes、pgr與grade時太多，因此不將size加入模型，最終的模型為hormon、nodes、pgr與grade。
+
+## Final Cox model
+
+```{r Cox final model}
+fit_Cox = coxph(Surv(rfstime,status) ~ hormon + nodes + pgr + grade,
+                ties=c("breslow"), data = gbsg)
+summary(fit_Cox)
+```
+
+最終模型為:
+$$
+h(t|x) = h_0(t)e^{-0.324Z_{hormon}+0.049Z_{nodes}-0.002Z_{pgr}+0.644Z_{grade2}+0.788Z_{grade3}+0.007Z_{size}}
+$$
+我們在此模型下有以下結論:
+ 
+- hormon : 有接受激素療法的患者風險比是沒接受激素療法的患者0.726倍
+  
+- nodes : 陽性淋巴結數每多一單位風險比是1.056倍
+  
+- pgr : 孕激素受體每多一單位風險比是0.998倍
+  
+- grade : 腫瘤分級第二級的患者風險比是第一級患者的1.920倍，第三級患者是第一級患者的2.243倍
+  
+
+\newpage
+
+# 3. Accelerated failure time model (加速失效模型)
+
+在建立完Cox PH model之後，我們確定了幾個對於風險比有顯著影響的變數包括hormon、nodes、pgr與grade四個變數，接著將這四個有顯著影響的變數對AFT模型做建模。
+
+## (1) Weibull distribution
+
+```{r}
+fit_wei = survreg(Surv(rfstime,status) ~ hormon + nodes + pgr + grade, 
+                  data = gbsg, dist = "weibull")
+(summary_fit_wei = summary(fit_wei))
+# 加速因子
+exp(summary_fit_wei$coefficients[-1])
+
+# \beta
+exp(-summary_fit_wei$coefficients[-1]/summary_fit_wei$scale)
+```
+
+我們在 Weibull AFT 模型下有以下結論:
+ 
+- hormon : 有接受激素療法的患者壽命與風險分別是沒接受激素療法的患者1.285倍與0.7088倍
+  
+- nodes : 陽性淋巴結數每多一單位壽命與風險分別為0.959倍與1.06倍
+  
+- pgr : 孕激素受體每多一單位壽命與風險分別為1.002倍與0.998倍
+  
+- grade2 : 腫瘤分級第二級的患者壽命與風險分別是第一級患者的0.616倍與1.958倍
+
+- grade3 : 腫瘤分級第三級的患者壽命與風險分別是第一級患者的0.546倍與2.314倍
+  
+   
+## (2) Loglogistic distribution
+
+```{r}
+fit_logit = survreg(Surv(rfstime,status) ~ hormon + nodes + pgr + grade, 
+                  data = gbsg, dist = "loglogistic")
+(summary_fit_logit = summary(fit_logit))
+# 加速因子
+exp(summary_fit_logit$coefficients[-1])
+
+# \beta
+exp(-summary_fit_logit$coefficients[-1]/summary_fit_logit$scale)
+```
+
+我們在 Loglogistic AFT 模型下有以下結論:
+ 
+- hormon : 有接受激素療法的患者壽命與風險分別是沒接受激素療法的患者1.366倍與0.582倍
+  
+- nodes : 陽性淋巴結數每多一單位壽命與風險分別為0.945倍與1.103倍
+  
+- pgr : 孕激素受體每多一單位壽命與風險分別為1.002倍與0.997倍
+  
+- grade2 : 腫瘤分級第二級的患者壽命與風險分別是第一級患者的0.615倍與2.329倍
+
+- grade3 : 腫瘤分級第三級的患者壽命與風險分別是第一級患者的0.540倍與2.918倍
+  
+
+# 四、結論
+
+本次分析希望藉由此資料集來分析各個因子影響乳癌的嚴重性與重要性，我們藉由Kaplan-Meier Survival estimate方法繪出存活曲線，並使用logrank test檢定兩組的存活率是否有顯著差異，本研究的兩個主要因子為meno(停經前與停經後)和hormon(是否接受激素療法)，在此方法下停經前後被檢定為不影響乳癌患者存活率的因子，但有接受激素療法的患者存活天數確實遠高於沒有接受激素療法的患者，後面我們也使用Cox PH model、AFT model來檢驗除了主要因子以外的其他因素哪些是嚴重影響乳癌患者風險與存活率，經由Cox PH model我們找出了幾個顯著影響乳癌患者風險的因子，像是nodes(陽性淋巴結數)、pgr(孕激素受體)、grade(腫瘤分級)與size(腫瘤大小)，也算出了固定其他因子的情況下個別對乳癌患者壽命與風險的影響，未來可以將時間因素考慮進去或許可以更精進模型的分析能力。
