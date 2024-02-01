@@ -21,13 +21,6 @@
 |hormon|是否接受激素療法(0= 否, 1 = 是)|　　　
 |rfstime|復發、死亡或失去追蹤時間|　　　
 |status|0 = 存活, 1 = 死亡|　　　　　
-　   　　
-```{r, echo=FALSE}
-library(survival)
-data("cancer",package = "survival")
-head(gbsg,3)
-tail(gbsg,3)
-```
 
    
 # 二、研究目的
